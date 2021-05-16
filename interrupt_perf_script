@@ -1,0 +1,11 @@
+#!/bin/bash
+
+grep vfio /proc/interrupts | cut -d ":" -f 1 | while read -r i; do
+        echo $i
+		# Change me !!!
+        MASK=0000079e
+        # Change me !!!
+        echo $MASK > /proc/irq/$i/smp_affinity
+done
+
+sudo cpupower frequency-set -g performance
