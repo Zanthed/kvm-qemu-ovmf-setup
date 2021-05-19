@@ -2,10 +2,24 @@
 
 grep vfio /proc/interrupts | cut -d ":" -f 1 | while read -r i; do
         echo $i
-		# Change me !!!
-        MASK=0000079e
-        # Change me !!!
+        MASK=000003cf
         echo $MASK > /proc/irq/$i/smp_affinity
 done
 
 sudo cpupower frequency-set -g performance
+
+#sudo chrt -a -f -p 99 $(pidof qemu-system-x86_64)
+#sudo chrt -a -f -p 1 $(pidof qemu-system-x86_64)
+#^ remove -a if problems
+
+
+sudo chrt -a -f -p 99 $(pidof jackdbus)
+
+#export IPTABLES_CMD_RAN
+
+#if [[ "$IPTABLES_CMD_RAN" != "yes" ]]; then
+sudo iptables -I FORWARD -i br0 -o br0 -j ACCEPT
+#   export IPTABLES_CMD_RAN="yes"
+#else
+#   echo "iptables command either already ran or unknown value. value: $IPTABLES_CMD_RAN"
+#fi

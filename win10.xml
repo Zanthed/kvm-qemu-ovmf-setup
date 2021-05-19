@@ -1,32 +1,56 @@
 <domain xmlns:qemu="http://libvirt.org/schemas/domain/qemu/1.0" type="kvm">
   <name>win10</name>
-  <uuid>9ee7f875-db2e-4c5a-96c3-e7442a84cedb</uuid>
+  <uuid>e645726b-7400-464b-b3a1-7010286fea18</uuid>
   <metadata>
     <libosinfo:libosinfo xmlns:libosinfo="http://libosinfo.org/xmlns/libvirt/domain/1.0">
       <libosinfo:os id="http://microsoft.com/win/10"/>
     </libosinfo:libosinfo>
   </metadata>
-  <memory unit="KiB">8388608</memory>
-  <currentMemory unit="KiB">8388608</currentMemory>
+  <memory unit="KiB">12521472</memory>
+  <currentMemory unit="KiB">12521472</currentMemory>
+  <memoryBacking>
+    <hugepages/>
+    <nosharepages/>
+    <locked/>
+  </memoryBacking>
   <vcpu placement="static">8</vcpu>
   <iothreads>1</iothreads>
   <cputune>
-    <vcpupin vcpu="0" cpuset="2"/>
-    <vcpupin vcpu="1" cpuset="3"/>
-    <vcpupin vcpu="2" cpuset="4"/>
-    <vcpupin vcpu="3" cpuset="5"/>
-    <vcpupin vcpu="4" cpuset="6"/>
-    <vcpupin vcpu="5" cpuset="7"/>
-    <vcpupin vcpu="6" cpuset="8"/>
+    <vcpupin vcpu="0" cpuset="0"/>
+    <vcpupin vcpu="1" cpuset="6"/>
+    <vcpupin vcpu="2" cpuset="1"/>
+    <vcpupin vcpu="3" cpuset="7"/>
+    <vcpupin vcpu="4" cpuset="2"/>
+    <vcpupin vcpu="5" cpuset="8"/>
+    <vcpupin vcpu="6" cpuset="3"/>
     <vcpupin vcpu="7" cpuset="9"/>
-    <emulatorpin cpuset="0-1"/>
-    <iothreadpin iothread="1" cpuset="0-1"/>
+    <emulatorpin cpuset="2,8"/>
+    <iothreadpin iothread="1" cpuset="3,9"/>
+    <iothreadsched iothreads="1" scheduler="fifo" priority="99"/>
   </cputune>
+  <sysinfo type="smbios">
+    <bios>
+      <entry name="vendor">American Megatrends Inc.</entry>
+    </bios>
+    <system>
+      <entry name="manufacturer">Micro-Star International Co., Ltd.</entry>
+      <entry name="product">MS-7B48</entry>
+      <entry name="version">1.0</entry>
+    </system>
+    <baseBoard>
+      <entry name="manufacturer">Micro-Star International Co., Ltd.</entry>
+      <entry name="product">Z370-A PRO (MS-7B48)</entry>
+      <entry name="version">1.0</entry>
+      <entry name="serial">H817195938</entry>
+    </baseBoard>
+  </sysinfo>
   <os>
     <type arch="x86_64" machine="pc-q35-5.2">hvm</type>
-    <loader readonly="yes" type="pflash">/usr/share/edk2-ovmf/x64/OVMF_CODE.fd</loader>
-    <nvram>/var/lib/libvirt/qemu/nvram/win10_VARS.fd</nvram>
+    <loader secure="yes" type="pflash">/usr/share/edk2-ovmf/x64/OVMF_CODE.ms.fd</loader>
+    <nvram template="/usr/share/edk2-ovmf/x64/OVMF_VARS.ms.fd">/var/lib/libvirt/qemu/nvram/win10_VARS.fd</nvram>
     <boot dev="hd"/>
+    <bootmenu enable="no"/>
+    <smbios mode="host"/>
   </os>
   <features>
     <acpi/>
@@ -35,21 +59,24 @@
       <relaxed state="on"/>
       <vapic state="on"/>
       <spinlocks state="on" retries="8191"/>
-      <vendor_id state="on" value="randomid"/>
+      <vpindex state="on"/>
+      <synic state="on"/>
+      <stimer state="on"/>
+      <reset state="on"/>
+      <frequencies state="on"/>
     </hyperv>
-    <kvm>
-      <hidden state="on"/>
-    </kvm>
-    <vmport state="off"/>
+    <smm state="on"/>
     <ioapic driver="kvm"/>
   </features>
-  <cpu mode="host-passthrough" check="none" migratable="on">
+  <cpu mode="host-passthrough" check="full" migratable="on">
     <topology sockets="1" dies="1" cores="4" threads="2"/>
   </cpu>
   <clock offset="localtime">
-    <timer name="rtc" tickpolicy="catchup"/>
-    <timer name="pit" tickpolicy="delay"/>
+    <timer name="rtc" present="no" tickpolicy="catchup" track="guest"/>
+    <timer name="pit" present="no" tickpolicy="delay"/>
+    <timer name="tsc" present="yes" mode="native"/>
     <timer name="hpet" present="no"/>
+    <timer name="kvmclock" present="yes"/>
     <timer name="hypervclock" present="yes"/>
   </clock>
   <on_poweroff>destroy</on_poweroff>
@@ -62,7 +89,7 @@
   <devices>
     <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <disk type="block" device="disk">
-      <driver name="qemu" type="raw" cache="writeback" io="threads" discard="unmap"/>
+      <driver name="qemu" type="raw" cache="none" io="threads" discard="unmap"/>
       <source dev="/dev/disk/by-id/ata-Samsung_SSD_860_EVO_250GB_S3YHNX1KB15676F"/>
       <target dev="sda" bus="scsi"/>
       <address type="drive" controller="0" bus="0" target="0" unit="0"/>
@@ -91,9 +118,9 @@
       <address type="pci" domain="0x0000" bus="0x01" slot="0x00" function="0x0"/>
     </controller>
     <controller type="pci" index="5" model="pcie-root-port">
-      <model name="pcie-root-port"/>
+      <model name="ioh3420"/>
       <target chassis="5" port="0x13"/>
-      <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x3"/>
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x3" multifunction="on"/>
     </controller>
     <controller type="pci" index="6" model="pcie-root-port">
       <model name="pcie-root-port"/>
@@ -103,6 +130,7 @@
     <controller type="pci" index="7" model="pcie-root-port">
       <model name="pcie-root-port"/>
       <target chassis="7" port="0x15"/>
+      <alias name="ua-pcie-7"/>
       <address type="pci" domain="0x0000" bus="0x00" slot="0x02" function="0x5"/>
     </controller>
     <controller type="pci" index="8" model="pcie-root-port">
@@ -117,8 +145,8 @@
     </controller>
     <controller type="pci" index="10" model="pcie-root-port">
       <model name="pcie-root-port"/>
-      <target chassis="10" port="0x18"/>
-      <address type="pci" domain="0x0000" bus="0x00" slot="0x03" function="0x0" multifunction="on"/>
+      <target chassis="10" port="0x8"/>
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x01" function="0x0" multifunction="on"/>
     </controller>
     <controller type="pci" index="11" model="pcie-root-port">
       <model name="pcie-root-port"/>
@@ -127,69 +155,63 @@
     </controller>
     <controller type="pci" index="12" model="pcie-root-port">
       <model name="pcie-root-port"/>
-      <target chassis="12" port="0x8"/>
-      <address type="pci" domain="0x0000" bus="0x00" slot="0x01" function="0x0"/>
+      <target chassis="12" port="0xb"/>
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x01" function="0x3"/>
     </controller>
-    <controller type="virtio-serial" index="0">
-      <address type="pci" domain="0x0000" bus="0x05" slot="0x00" function="0x0"/>
+    <controller type="pci" index="13" model="pcie-root-port">
+      <model name="pcie-root-port"/>
+      <target chassis="13" port="0x9"/>
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x01" function="0x1"/>
     </controller>
-    <controller type="sata" index="0">
-      <address type="pci" domain="0x0000" bus="0x00" slot="0x1f" function="0x2"/>
+    <controller type="pci" index="14" model="pcie-root-port">
+      <model name="pcie-root-port"/>
+      <target chassis="15" port="0xa"/>
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x01" function="0x2"/>
     </controller>
     <controller type="scsi" index="0" model="virtio-scsi">
       <driver queues="8" iothread="1"/>
       <address type="pci" domain="0x0000" bus="0x07" slot="0x00" function="0x0"/>
     </controller>
-    <interface type="network">
+    <controller type="sata" index="0">
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x1f" function="0x2"/>
+    </controller>
+    <interface type="bridge">
       <mac address="52:54:00:71:69:a7"/>
-      <source network="br0"/>
-      <model type="virtio"/>
-      <driver queues="8"/>
+      <source bridge="br0"/>
+      <model type="virtio-net-pci"/>
       <address type="pci" domain="0x0000" bus="0x02" slot="0x00" function="0x0"/>
     </interface>
-    <input type="mouse" bus="virtio">
-      <address type="pci" domain="0x0000" bus="0x08" slot="0x00" function="0x0"/>
-    </input>
-    <input type="keyboard" bus="virtio">
-      <address type="pci" domain="0x0000" bus="0x09" slot="0x00" function="0x0"/>
-    </input>
     <input type="mouse" bus="ps2"/>
     <input type="keyboard" bus="ps2"/>
     <tpm model="tpm-crb">
-      <backend type="passthrough">
-        <device path="/dev/tpm0"/>
-      </backend>
+      <backend type="emulator" version="2.0"/>
     </tpm>
     <sound model="ich9">
       <address type="pci" domain="0x0000" bus="0x00" slot="0x1b" function="0x0"/>
     </sound>
     <hostdev mode="subsystem" type="pci" managed="yes">
       <source>
-        <address domain="0x0000" bus="0x03" slot="0x00" function="0x0"/>
+        <address domain="0x0000" bus="0x01" slot="0x00" function="0x0"/>
       </source>
-      <rom bar="on" file="/usr/local/lib/GTX550Ti_GF10x.bin"/>
-      <address type="pci" domain="0x0000" bus="0x0a" slot="0x00" function="0x0"/>
+      <address type="pci" domain="0x0000" bus="0x05" slot="0x00" function="0x0" multifunction="on"/>
     </hostdev>
     <hostdev mode="subsystem" type="pci" managed="yes">
       <source>
-        <address domain="0x0000" bus="0x03" slot="0x00" function="0x1"/>
+        <address domain="0x0000" bus="0x01" slot="0x00" function="0x1"/>
       </source>
-      <address type="pci" domain="0x0000" bus="0x0b" slot="0x00" function="0x0"/>
+      <address type="pci" domain="0x0000" bus="0x05" slot="0x00" function="0x1"/>
     </hostdev>
-    <memballoon model="virtio">
-      <address type="pci" domain="0x0000" bus="0x06" slot="0x00" function="0x0"/>
-    </memballoon>
-    <rng model="virtio">
-      <backend model="random">/dev/urandom</backend>
-      <address type="pci" domain="0x0000" bus="0x0c" slot="0x00" function="0x0"/>
-    </rng>
+    <memballoon model="none"/>
   </devices>
   <qemu:commandline>
     <qemu:arg value="-audiodev"/>
-    <qemu:arg value="pa,id=hda,server=unix:/run/user/1000/pulse/native"/>
+    <qemu:arg value="jack,id=a0,in.client-name=win10,out.client-name=win10,in.start-server=on,out.start-server=on"/>
+    <qemu:arg value="-device"/>
+    <qemu:arg value="hda-duplex,audiodev=a0"/>
     <qemu:arg value="-object"/>
     <qemu:arg value="input-linux,id=mouse1,evdev=/dev/input/by-id/usb-Razer_Razer_DeathAdder_Essential_White_Edition-event-mouse"/>
     <qemu:arg value="-object"/>
-    <qemu:arg value="input-linux,id=kbd1,evdev=/dev/input/by-id/usb-Lite-On_Technology_Corp._USB_Multimedia_Keyboard-event-kbd,grab_all=on,repeat=on"/>
+    <qemu:arg value="input-linux,id=kbd1,evdev=/dev/input/by-id/usb-413c_Dell_KB216_Wired_Keyboard-event-kbd,grab_all=on,repeat=on"/>
+    <qemu:env name="PIPEWIRE_RUNTIME_DIR" value="/run/user/1000"/>
   </qemu:commandline>
 </domain>
