@@ -40,13 +40,13 @@
 - Guest SSD: SATA Samsung 860 EVO 250GB
 
 ## Software
-- Motherboard firmware version: [7B48v2C 2020-06-10](https://download.msi.com/bos_exe/mb/7B48v2C.zip)
-- Linux distribution (Host OS): [Garuda Linux GNOME](https://garudalinux.org/)
-- Linux kernel and version: linux-xanmod 5.12.4
+- Motherboard firmware version: [7B48v2D2 (Beta) 2021-04-20](https://download.msi.com/bos_exe/mb/7B48v2D2.zip)
+- Linux distribution (Host OS): Arch Linux
+- Linux kernel and version: linux-zen-lts510 (disabled NUMA, use Intel GCC optimizations, and disabled tracing when compiling)
 - QEMU version: 6.0.0
 - Guest OS: Microsoft Windows 10 Enterprise 20H2 (19042.985)
-- Distro is using Pipewire with Pulseaudio compatibility.
-- Guest audio is using Pulseaudio\/Pipewire server.
+- Distro is using Pipewire JACK with Pipewire JACK dropin.
+- Guest audio is using Pipewire JACK _and_ NVIDIA HDMI Audio. I alter between both if I need a microphone or not. Usually I just use HDMI audio.
 <hr>
 
 # Preinstallation\/Setup
@@ -258,6 +258,8 @@ Special things to speed up VM performance:
       <reset state="on"/>
       <vendor_id state="on" value="putwhatever"/>
       <frequencies state="on"/>
+      <reenlightenment state='on'/>
+      <tlbflush state='on'/>
     </hyperv>
     <kvm>
       <hidden state="on"/>
@@ -272,11 +274,16 @@ Special things to speed up VM performance:
 ```xml
   <cpu mode="host-passthrough" check="none" migratable="on">
     <cache mode="passthrough"/>
+  </cpu>
+```
+
+Intel users do not need to set the require policy on the following features:
+```xml
     <feature policy="require" name="invtsc"/>
     <feature policy="require" name="vmx"/>
     <feature policy="require" name="topoext"/>
-  </cpu>
 ```
+This is only necessary if you are on AMD Ryzen.
 
 ## virtio-scsi (and Virtio drivers)
 
@@ -294,7 +301,7 @@ Create a virtio-scsi controller:
 Create a SCSI raw block disk using your real drive:
 ```xml
 <disk type="block" device="disk">
-  <driver name="qemu" type="raw" cache="none" io="threads" discard="unmap"/>
+  <driver name="qemu" type="raw" cache="writeback" io="threads" discard="unmap"/>
   <source dev="/dev/disk/by-id/ata-Samsung_SSD_860_EVO_250GB_S3YHNX1KB15676F"/>
   <target dev="sda" bus="scsi"/>
   <address type="drive" controller="0" bus="0" target="0" unit="0"/>
@@ -320,6 +327,8 @@ NVIDIA drivers before v465 will require you to hide the KVM leaf and spoof the H
 
 ## System and VM internal clock
 Very important so you don't suffer the pain of awful latency from things like HPET or a clock that fails to catchup properly.
+
+Note: Windows machines use `localtime` unlike Linux machines which use `rtc`! Very important to set clock offset to localtime. This is related to Linux and Windows dual booting showing incorrect times. [\(How to Fix Windows and Linux Showing Different Times When Dual Booting\)](https://www.howtogeek.com/323390/how-to-fix-windows-and-linux-showing-different-times-when-dual-booting/)
 ```xml
   <clock offset="localtime">
     <timer name="rtc" tickpolicy="catchup" track="guest"/>
@@ -358,13 +367,12 @@ Requires `swtpm`.
 ```
 
 ## Reducing VM presence
-_(Not meant to be exhaustive. VM detection is very easy no matter how hard you try, but you can do some things to get around basic detections. Do not use a VM for secure exam testing or tournament matches. Even if your intentions are not illicit, they are almost always forbidden.)_
+_(Not meant to be exhaustive. Hypervisor detection is very easy no matter how hard you try, but you can do some things to get around basic detections such as Faceit Anti Cheat, ESEA, and EasyAC. Do not use a VM for secure exam testing or tournament matches. Even if your intentions are not illicit, they are always forbidden if found to be using one after the fact.)_
 
 Pass through as much physical hardware as you can through IOMMU and remove unused hardware like SPICE displays and graphics and serial controllers.
 
-Hide certain timers:
+Hide certain timers (hiding hypervclock may impact performance slightly):
 <br>
-(hypervclock is up to you. probably keep it for performance. no benchmarks though.)
 ```xml
   <clock offset="localtime">
     <timer name="kvmclock" present="no"/>
@@ -381,17 +389,14 @@ Use host's SMBIOS:
 
 [Hide KVM leaf and spoof Hyper-V vendor ID](#nvidia-drivers)
 
-Disable `hypervisor` feature:
+Disable `hypervisor` feature and pass through your CPU features and model:
 ```xml
   <cpu mode="host-passthrough" check="none" migratable="on">
     <feature policy="disable" name="hypervisor"/>
   </cpu>
 ```
 
-Pass through your CPU features and model:
-```xml
-  <cpu mode="host-passthrough" check="none" migratable="on">
-```
+Remove as many SPICE, virtio, QEMU, etc drivers and hardware. Pass through as much physical hardware as you can.
 
 ## Minor performance tweaks
 Blacklist the iTCO_wdt (kernel watchdog) module:
@@ -512,28 +517,11 @@ If you have an 8 core 1 thread setup, yours will look something like this:
 
 We'll also pin at least one or two CPUs for the emulator (QEMU) and the IO thread:
 ```xml
-    <emulatorpin cpuset="0,6"/>
-    <iothreadpin iothread="1" cpuset="5,11"/>
+    <emulatorpin cpuset="2,8"/>
+    <iothreadpin iothread="1" cpuset="3,9"/>
 ```
 
 We are pinning core 0 and thread 6 for the emulator, and core 5 and thread 11 for IO processing as defined by iothread 1. We can set the virtio-scsi controller and virtio network card to use the iothread 1 as shown [here](#virtio-scsi-and-virtio-drivers) for IOPS.
-
-## Scheduler and Priority
-
-This one is pretty simple. Just setting the vCPUs defined to a scheduler called fifo and the priority to 99 aka realtime, which is where a realtime kernel _could_ be in handy for ultra low latency.
-
-```xml
-    <vcpusched vcpus="0" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="1" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="2" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="3" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="4" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="5" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="6" scheduler="fifo" priority="99"/>
-    <vcpusched vcpus="7" scheduler="fifo" priority="99"/>
-```
-
-This is the equivalent to the command commnonly seen as: `sudo chrt -a -f -p 99 ($pidof qemu-system-x86_64)`
 
 ## Isolating the CPUs
 We need to isolate the pinned CPUs from being used by the host. This is pretty easy through the kernel arguments `nohz_full, rcu_nocbs, isolcpus`. 
