@@ -9,7 +9,7 @@
 - [Installation](#installation)
 - [Post-installation (and performance tweaks!)](#post-installation-and-performance-tweaks)
   - [Networking](#networking)
-  - [Hyper-V enlightenments, APIC EOI, SMM, IOAPIC driver, and vmport](#hyper-v-enlightenments-apic-eoi-smm-ioapic-driver-and-vmport)
+  - [Hyper-V enlightenments, APIC, SMM, IOAPIC driver, and vmport](#hyper-v-enlightenments-apic-smm-ioapic-driver-and-vmport)
   - [Passthrough host CPU cache and enable CPU features](#passthrough-host-cpu-cache-and-enable-cpu-features)
   - [virtio-scsi (and Virtio drivers)](#virtio-scsi-and-virtio-drivers)
   - [NVIDIA Drivers](#nvidia-drivers)
@@ -21,7 +21,6 @@
 - [CPU Pinning, Interrupts, Affinity, Governors, Topology, Isolating, and Priorities](#cpu-pinning-interrupts-affinity-governors-topology-isolating-and-priorities)
   - [Topology](#topology)
   - [CPU Pinning and Layout](#cpu-pinning-and-layout)
-  - [Scheduler and Priority](#scheduler-and-priority)
   - [Isolating the CPUs](#isolating-the-cpus)
   - [_Interrupts, Governors, and Affinity coming soon. I need sleep._](#interrupts-governors-and-affinity-coming-soon-i-need-sleep)
 
@@ -101,11 +100,11 @@ HOOKS="base udev autodetect modconf ..."
 
 `/etc/modprobe.d/kvm.conf`
 ```
-# Ignoring MSRS solves bugcheck issue with 1809+ guests
+# Ignoring MSRS solves bugcheck issue with 1809+ guests. Second option prevents clogging up dmesg.
 options kvm ignore_msrs=1
 options kvm report_ignored_msrs=0
 
-# Usually on by default, but just to be safe since we might want to use WSL2 or Windows Sandbox.
+# Usually on by default, but just to be safe since we will use Hyper-V virtualization for security such as Windows Sandbox and Windows Defender Application Guard.
 options kvm_intel nested=1
 ```
 
@@ -113,9 +112,12 @@ options kvm_intel nested=1
 ```
 install vfio-pci /usr/local/bin/vfio-pci-override.sh
 options vfio-pci ids=10de:1b81,10de:10f0
-
-options vfio_iommu_type1 allow_unsafe_interrupts=1
 ```
+
+Warning: Do not enable unsafe interrupts. Disabling unsafe interrupts is for CPUs that has poor\/legacy IOMMU and doesn't support interrupt remapping. You might need this if you're using the ACS patch. You're killing IOMMU anyways by using ACS patch, killing all virtualization-based security protections and risk of malicious devices attacking your host easier.
+<br><br>Disabling unsafe interrupts and using Message Signaled Interrupts can allow devices to spoof interrupts from other devices, thus VM escaping by getting host DMA write access to the interrupt block from the guest. This is because MSI interrupts are triggered by a DMA write to a special address range. Interrupt remapping in newer IOMMU protects this address range. If your CPU doesn't support interrupt remapping, throw it out and get something from at least 2013.
+
+If you absolutely need it, check `dmesg` and see if it tells you to use it.
 
 `/etc/default/grub` (Kernel commandline)
 ```
@@ -136,15 +138,18 @@ This is allocating huge pages at boot time.
 <br>
 We are using static huge pages for improved performance. We set the page files to 1GB each and allocate 14 of them. The VM has 12GB of memory allocated. It usually requires some extra pages rather than the exact else it fails to launch.
 
+We're disabling transparent hugepages as it can hinder performance fro the kernel dynamically allocating hugepages, increasing CPU usage. Allocating huge pages at boot time reduces memory fragmentation the most.
+<br>See https://pingcap.com/blog/why-we-disable-linux-thp-feature-for-databases
+
 While modern CPUs should be able to do 1GB pages, always double check:
 <br>
 `cat /proc/cpuinfo | grep -i 'pdpe1gb'`
 <br>
 If there is output, you can safely set page sizes to 1GB. Otherwise, you'll need to use 2MB pages and calculate how many pages you need to allocate.
 
-To give KVM access to the hugepages, add the following to your `/etc/fstab`:
+Set this line in your fstab to be sure hugepages are allocated, and use noatime of course.
 ```
-hugetlbfs       /dev/hugepages  hugetlbfs       mode=01770,gid=kvm        0 0
+hugetlbfs       /dev/hugepages  hugetlbfs       noatime,pagesize=1G        0 0
 ```
 
 Add yourself to the `libvirt` and `kvm` group: `sudo gpasswd -a $USER kvm,libvirt`
@@ -182,12 +187,7 @@ cgroup_device_acl = [
 ```
 cgroup_device_acl is for allow access to pass through keyboard and mouse data to guest via evdev. See: https://wiki.archlinux.org/index.php/PCI_passthrough_via_OVMF#Passing_keyboard/mouse_via_Evdev
 
-`/etc/libvirt/libvirtd.conf`
-```
-unix_sock_group = "libvirt"
-# ...
-unix_sock_rw_perms = "0770"
-```
+Note you will absolutely want to install the virtio-input driver if you take this route instead of a USB passthrough. The default driver causes very, very, very high DPC latency.
 
 <hr>
 
@@ -237,43 +237,47 @@ If you pass through a physical network card, check if it can do SR-IOV. It's bla
 <br>
 If there is output, replace the model type with `sr-iov`.
 
-Model of network card is virtio. Emulating a real card is very CPU intensive and has a lot of overhead compared to virtio. Though, passing through real hardware is always better.
+Model of network card is virtio. Emulating a real card is very CPU intensive and has a lot of overhead compared to virtio which uses paravirtualization. Though, passing through real hardware is always better. I suggest purchasing an Intel card that can do hardware timestamps.
 <br>
-Windows requires NetKVM driver from virtio drivers to utilize virtio model.
+Windows requires NetKVM driver from virtio drivers to utilize virtio model for paravirtualization.
 
-## Hyper-V enlightenments, APIC EOI, SMM, IOAPIC driver, and vmport
+If you use `virtio` instead of `virtio-net-pci`, set your driver queues for multiqueue properly to allow faster packet processing!
+<br>See https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_network_device
+
+## Hyper-V enlightenments, APIC, SMM, IOAPIC driver, and vmport
 
 Special things to speed up VM performance:
 ```xml
   <features>
     <acpi/>
-    <apic eoi="on"/>
+    <apic>
     <hyperv>
       <relaxed state="on"/>
       <vapic state="on"/>
       <spinlocks state="on" retries="8191"/>
       <vpindex state="on"/>
+      <runtime state="on"/>
       <synic state="on"/>
       <stimer state="on"/>
       <reset state="on"/>
-      <vendor_id state="on" value="putwhatever"/>
+      <vendor_id state="on" value="eridanampora"/>
       <frequencies state="on"/>
       <reenlightenment state='on'/>
       <tlbflush state='on'/>
     </hyperv>
-    <kvm>
-      <hidden state="on"/>
-    </kvm>
     <vmport state="off"/>
     <smm state="on"/>
     <ioapic driver="kvm"/>
   </features>
 ```
 
+AMD users might need to use
+`<apic eoi="on"/>
+
 ## Passthrough host CPU cache and enable CPU features
 ```xml
-  <cpu mode="host-passthrough" check="none" migratable="on">
-    <cache mode="passthrough"/>
+  <cpu mode="host-passthrough" check="full" migratable="on">
+    <topology sockets='1' dies='1' cores='4' threads='2'/>
   </cpu>
 ```
 
@@ -286,49 +290,67 @@ Intel users do not need to set the require policy on the following features:
 This is only necessary if you are on AMD Ryzen.
 
 ## virtio-scsi (and Virtio drivers)
-
 Grab the ISO for Fedora's Virtio drivers: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/
+<br>_Note, UEFI Secure Boot guests: As these drivers are rebuilds of Red Hat's virtio drivers due to their licensing, they are not signed the same way that Windows 10 requires now. Windows 10 now requires, as of 1803 to have drivers signed by Microsoft's WHQL, otherwise they will fail to load. If you use Secure Boot on the guest like me you will need to obtain Red Hat's virtio drivers instead of Fedora's rebuilds. If you use Scream audio, the developer does sign their driver to get around Windows 10 forbidding unsigned drivers, but it is impossible to get it WHQL approved and signed due to the way it works._
+
+_Otherwise, continue and ignore._
 
 Mount it, run `virtio-win-guest-tools.exe`. Install all the drivers and shut down.
 
 Create a virtio-scsi controller:
 ```xml
 <controller type="scsi" index="0" model="virtio-scsi">
-  <driver queues="8" iothread="1"/>
+  <driver queues="5" iothread="1"/>
 </controller>
 ```
+
+**Important!** The Arch Wiki poorly documents that to increase performance, you should use multiqueue by setting `queues` to `8`. While this is true, setting too many queues than your hardware can handle can cause lockups and thrash the host CPU, decreasing performance severely on heavy I/O operations. You should use no more than the amount of vCPUs you have on your guest. If you have 6 vCPUs, including hyperthreading, use 6. I personally drop 1 queue just to be safe.
 
 Create a SCSI raw block disk using your real drive:
 ```xml
 <disk type="block" device="disk">
-  <driver name="qemu" type="raw" cache="writeback" io="threads" discard="unmap"/>
+  <driver name="qemu" type="raw" cache="none" io="native" discard="unmap"/>
   <source dev="/dev/disk/by-id/ata-Samsung_SSD_860_EVO_250GB_S3YHNX1KB15676F"/>
   <target dev="sda" bus="scsi"/>
   <address type="drive" controller="0" bus="0" target="0" unit="0"/>
 </disk>
 ```
 
-Depending on whether you have an SSD or HDD, those arguments will differ your needs. View [this](https://wiki.archlinux.org/title/PCI_passthrough_via_OVMF#Considerations) page for what you should pick.
+**Important!** The AIO (asynchronous I/O) is a major performance factor based on your hardware. The Arch wiki, again, poorly documents and even gets this section completely wrong. 
 
-## NVIDIA Drivers
+Arch Wiki! Let me correct your incorrect advice: Native does **not** use a single threaded synchronous model. That's not how proper asynchronous processing works. It also does not "lower" peak performance. Userspace is slower than kernel space. `threads` uses userspace threads. `native` uses kernel space threads. Spawning dozens of threads to do something in userspace is never more efficient just because you have "enough host cores". If you need to spawn dozens of threads, you need to consider using kernel space for better efficiency and avoiding host lockups.
+
+Now, back to the main topic.
+
+QEMU can use two AIO methods: the userspace method by spawning dozens of userspace threads (this is not the same as I/O threads) and the kernel method. Both asynchronous, but are very difference in performance.
+
+Using the userspace method (`io='threads'`) will spawn and scale userspace threads based on the amount of guest I/O operations. This is very compatible and works in all environments, but it is not as efficient as kernel AIO.
+
+Using the kernel AIO (`cache=none` `io=native`) is the fastest. This is the best choice for performance for block devices. RAW and QCOW2 (**with** pre-allocation) also benefit the best from this. Warning though if you do not pre-allocate, you will find using kernel AIO can decrease performance due to writing to not yet allocated sectors and lock up the threads.
+
+If you happen to have more than one VM and all use `native`, you might find yourself failing to start VMs because you reached the max AIO requests. To see the current value, run `# sysctl fs.aio-nr fs.aio-max-nr`.
+
+Increase `fs.aio-max-nr` to a higher number. E.g. `sysctl -w fs.aio-max-nr=4194304`
+
+**TLDR: Use `cache=none io=native`.**
+
+## NVIDIA Drivers 
 I'll assume you have already got the process of passing through your GPU done and now you just need drivers.
 
-NVIDIA drivers before v465 will require you to hide the KVM leaf and spoof the Hyper-V vendor ID to avoid error 43:
+NVIDIA drivers before v465 will require you to simply spoof the Hyper-V vendor ID to avoid error 43:
 ```xml
   <features>
     <hyperv>
-      <vendor_id state="on" value="putwhatever"/>
+      <vendor_id state="on" value="eridanampora"/>
     </hyperv>
-    <kvm>
-      <hidden state="on"/>
-    </kvm>
   </features>
 ```
+  _NVIDIA actually admits that this error 43 issue is a bug and was not intended, but they made fixing this a low priority until 465. In the past, you had to hide the KVM leaf and spoof the Hyper-V vendor ID. However, they did fix in 393 (?) that hiding the KVM leaf was no longer necessary._
 
 ## System and VM internal clock
-Very important so you don't suffer the pain of awful latency from things like HPET or a clock that fails to catchup properly.
+Very important so you don't suffer the pain of awful latency from things like HPET or a clock that fails to catchup properly which would induce DPC latency.
 
-Note: Windows machines use `localtime` unlike Linux machines which use `rtc`! Very important to set clock offset to localtime. This is related to Linux and Windows dual booting showing incorrect times. [\(How to Fix Windows and Linux Showing Different Times When Dual Booting\)](https://www.howtogeek.com/323390/how-to-fix-windows-and-linux-showing-different-times-when-dual-booting/)
+Note: Windows machines use `localtime` unlike Linux machines which use `rtc`! Very important to set clock offset to localtime. This is related to Linux and Windows dual booting showing incorrect times because Windows is trying to use `localtime` where Linux is using `rtc` and are causing conflicts.
 ```xml
   <clock offset="localtime">
     <timer name="rtc" tickpolicy="catchup" track="guest"/>
@@ -343,6 +365,8 @@ Note: Windows machines use `localtime` unlike Linux machines which use `rtc`! Ve
 In your BIOS, disable HPET and make sure Linux is using TSC:
 <br>
 `cat /sys/devices/system/clocksource/clocksource0/current_clocksource`
+
+See Red Hat's guide on optimizing the host TSC for low latency\/real time: https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux_for_real_time/8/html-single/tuning_guide/index
 
 ## Message signal-based interrupts
 
@@ -409,9 +433,7 @@ Prevent ARP Flux from networks in same segment<sup>[1](https://access.redhat.com
 <br>
 `sudo echo "net.ipv4.conf.all.arp_filter = 1" > /etc/sysctl.d/30-arpflux.conf`
 
-Try using performance and latency-optimized kernels like linux-xanmod (https://xanmod.org/) or linux-zen. I personally use xanmod. Both also include the ACS patches.
-
-Also try experimenting with real time kernels like xanmod-rt. My results were not good, but some people may have better results.
+Try using performance and latency-optimized kernels like linux-xanmod (https://xanmod.org/) or linux-zen. I personally use xanmod. Both also include the ACS patches. Experiment with real-time kernels too. Everyone's hardware is different.
 
 # CPU Pinning, Interrupts, Affinity, Governors, Topology, Isolating, and Priorities
 This warrants an entirely separate section because of how much of an impact this can make while also requiring a decent amount of time. And I mean a _major_ impact. Even after doing all those tweaks above, I still had awful DPC latency and stutters. After just a bit of messing with interrupts and pinning, I am almost consistently under 800 µs.
@@ -482,14 +504,14 @@ CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE MAXMHZ    MINMHZ
 Now that we know our layout, we can pin the CPUs.
 ```xml
   <cputune>
-    <vcpupin vcpu="0" cpuset="1"/>
-    <vcpupin vcpu="1" cpuset="7"/>
-    <vcpupin vcpu="2" cpuset="2"/>
-    <vcpupin vcpu="3" cpuset="8"/>
-    <vcpupin vcpu="4" cpuset="3"/>
-    <vcpupin vcpu="5" cpuset="9"/>
-    <vcpupin vcpu="6" cpuset="4"/>
-    <vcpupin vcpu="7" cpuset="10"/>
+    <vcpupin vcpu="0" cpuset="0"/>
+    <vcpupin vcpu="1" cpuset="6"/>
+    <vcpupin vcpu="2" cpuset="1"/>
+    <vcpupin vcpu="3" cpuset="7"/>
+    <vcpupin vcpu="4" cpuset="2"/>
+    <vcpupin vcpu="5" cpuset="8"/>
+    <vcpupin vcpu="6" cpuset="3"/>
+    <vcpupin vcpu="7" cpuset="9"/>
   </cputune>
 ```
 This is for a 4 core 2 thread setup aka 4 cores with hyperthreading so 8 threads. Pay attention to the pattern. In this, we're skipping the first core (core 0) because lots of applications tend to use the first core. So core 1 is actually core 2.
@@ -515,22 +537,21 @@ If you have an 8 core 1 thread setup, yours will look something like this:
   </cputune>
 ```
 
-We'll also pin at least one or two CPUs for the emulator (QEMU) and the IO thread:
+Pin CPUs for QEMU itself and the iothread. Since we'll be restricting the host from using these CPUs, use the ones you restricted on the vCPU for the emulator and iothread.
 ```xml
-    <emulatorpin cpuset="2,8"/>
-    <iothreadpin iothread="1" cpuset="3,9"/>
+    <emulatorpin cpuset="3,9"/>
+    <iothreadpin iothread="1" cpuset="2,8"/>
 ```
 
-We are pinning core 0 and thread 6 for the emulator, and core 5 and thread 11 for IO processing as defined by iothread 1. We can set the virtio-scsi controller and virtio network card to use the iothread 1 as shown [here](#virtio-scsi-and-virtio-drivers) for IOPS.
+We are pinning core 3 and thread 9 for the emulator, and core 2 and thread 8 for IO processing as defined by iothread 1. We can set the virtio-scsi controller and virtio network card to use the iothread 1 as shown [here](#virtio-scsi-and-virtio-drivers) for IOPS.
 
 ## Isolating the CPUs
 We need to isolate the pinned CPUs from being used by the host. This is pretty easy through the kernel arguments `nohz_full, rcu_nocbs, isolcpus`. 
 
 Append the following arguments based on your pinned CPUs:
-`nohz_full=1,2,3,4,7,8,9,10 rcu_nocbs=1,2,3,4,7,8,9,10 isolcpus=1,2,3,4,7,8,9,10`
-
-For example, I pinned CPUs 1,7,2,8,3,9,4,10. So I will isolate 1,2,3,4,7,8,9,10. You can also specify a range such a 1-10 which isolates 1,2,3,4,5,6,7,8,9,10.
+`nohz_full=0-3,6-9 rcu_nocbs=0-3,6-9 isolcpus=0-3,6-9`
 
 Update your bootloader config and reboot.
 
 ## _Interrupts, Governors, and Affinity coming soon. I need sleep._
+TODO: Document interrupt pinning, CPU governors, systemd tweaks, memballoon disabling.

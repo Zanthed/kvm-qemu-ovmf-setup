@@ -2,10 +2,17 @@
 
 grep vfio /proc/interrupts | cut -d ":" -f 1 | while read -r i; do
         echo $i
-		# Change me !!!
-        MASK=0000079e
-        # Change me !!!
+        # change me!!!!!!!!!!!!
+        MASK=000003cf
+        # change me!!!!!!!!!!!!
         echo $MASK > /proc/irq/$i/smp_affinity
 done
 
-sudo cpupower frequency-set -g performance
+chrt -a -f -p 99 $(pidof jackdbus)
+#chrt -a -f -p 99 $(pidof pipewire)
+
+cpupower frequency-set -g performance
+
+echo 2048 > "/sys/class/rtc/rtc0/max_user_freq"
+
+iptables -I FORWARD -i br0 -o br0 -j ACCEPT
