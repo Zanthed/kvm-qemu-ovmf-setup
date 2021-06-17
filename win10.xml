@@ -1,10 +1,3 @@
-<!--
-WARNING: THIS IS AN AUTO-GENERATED FILE. CHANGES TO IT ARE LIKELY TO BE
-OVERWRITTEN AND LOST. Changes to this xml configuration should be made using:
-  virsh edit win10
-or other application using the libvirt API.
--->
-
 <domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
   <name>win10</name>
   <uuid>a47aa574-3037-4da5-8ace-dd71b2ba4e9b</uuid>
@@ -34,8 +27,8 @@ or other application using the libvirt API.
     <vcpupin vcpu='5' cpuset='8'/>
     <vcpupin vcpu='6' cpuset='3'/>
     <vcpupin vcpu='7' cpuset='9'/>
-    <emulatorpin cpuset='4,10'/>
-    <iothreadpin iothread='1' cpuset='5,11'/>
+    <emulatorpin cpuset='2,8'/>
+    <iothreadpin iothread='1' cpuset='3,9'/>
   </cputune>
   <os>
     <type arch='x86_64' machine='pc-q35-6.0'>hvm</type>
@@ -62,9 +55,6 @@ or other application using the libvirt API.
       <reenlightenment state='on'/>
       <tlbflush state='on'/>
     </hyperv>
-    <kvm>
-      <hidden state='on'/>
-    </kvm>
     <vmport state='off'/>
     <smm state='on'/>
     <ioapic driver='kvm'/>
@@ -90,9 +80,8 @@ or other application using the libvirt API.
   <devices>
     <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <disk type='block' device='disk'>
-      <driver name='qemu' type='raw' cache='none' io='threads' discard='unmap'/>
+      <driver name='qemu' type='raw' cache='none' io='native' discard='unmap'/>
       <source dev='/dev/disk/by-id/ata-WDC_WDS240G1G0A-00SS50_174029803438'/>
-      <backingStore/>
       <target dev='sda' bus='scsi'/>
       <address type='drive' controller='0' bus='0' target='0' unit='0'/>
     </disk>
@@ -145,7 +134,7 @@ or other application using the libvirt API.
       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x4'/>
     </controller>
     <controller type='scsi' index='0' model='virtio-scsi'>
-      <driver queues='8' iothread='1'/>
+      <driver queues='4' iothread='1'/>
       <address type='pci' domain='0x0000' bus='0x08' slot='0x01' function='0x0'/>
     </controller>
     <controller type='sata' index='0'>

@@ -20,7 +20,6 @@
   - [Minor performance tweaks](#minor-performance-tweaks)
 - [CPU Pinning, Interrupts, Affinity, Governors, Topology, Isolating, and Priorities](#cpu-pinning-interrupts-affinity-governors-topology-isolating-and-priorities)
   - [Topology](#topology)
-  - [CPU Pinning and Layout](#cpu-pinning-and-layout)
   - [Isolating the CPUs](#isolating-the-cpus)
   - [_Interrupts, Governors, and Affinity coming soon. I need sleep._](#interrupts-governors-and-affinity-coming-soon-i-need-sleep)
 
@@ -41,7 +40,7 @@
 ## Software
 - Motherboard firmware version: [7B48v2D2 (Beta) 2021-04-20](https://download.msi.com/bos_exe/mb/7B48v2D2.zip)
 - Linux distribution (Host OS): Arch Linux
-- Linux kernel and version: linux-zen-lts510 (disabled NUMA, use Intel GCC optimizations, and disabled tracing when compiling)
+- Linux kernel and version: linux-hardened
 - QEMU version: 6.0.0
 - Guest OS: Microsoft Windows 10 Enterprise 20H2 (19042.985)
 - Distro is using Pipewire JACK with Pipewire JACK dropin.
@@ -138,7 +137,7 @@ This is allocating huge pages at boot time.
 <br>
 We are using static huge pages for improved performance. We set the page files to 1GB each and allocate 14 of them. The VM has 12GB of memory allocated. It usually requires some extra pages rather than the exact else it fails to launch.
 
-We're disabling transparent hugepages as it can hinder performance fro the kernel dynamically allocating hugepages, increasing CPU usage. Allocating huge pages at boot time reduces memory fragmentation the most.
+We're disabling transparent hugepages as it can hinder performance from the kernel dynamically allocating hugepages, increasing CPU usage. Allocating huge pages at boot time reduces memory fragmentation the most.
 <br>See https://pingcap.com/blog/why-we-disable-linux-thp-feature-for-databases
 
 While modern CPUs should be able to do 1GB pages, always double check:
@@ -413,9 +412,15 @@ Use host's SMBIOS:
 
 [Hide KVM leaf and spoof Hyper-V vendor ID](#nvidia-drivers)
 
+```xml
+  <kvm>
+    <hidden state="on">
+  </kvm>
+```
+
 Disable `hypervisor` feature and pass through your CPU features and model:
 ```xml
-  <cpu mode="host-passthrough" check="none" migratable="on">
+  <cpu mode="host-passthrough" check="full" migratable="on">
     <feature policy="disable" name="hypervisor"/>
   </cpu>
 ```
@@ -435,6 +440,8 @@ Prevent ARP Flux from networks in same segment<sup>[1](https://access.redhat.com
 
 Try using performance and latency-optimized kernels like linux-xanmod (https://xanmod.org/) or linux-zen. I personally use xanmod. Both also include the ACS patches. Experiment with real-time kernels too. Everyone's hardware is different.
 
+Installed `tuned` and `tuned-adm` and set the profile to `virtual-host` to optimize the host for virtualizing guests.
+
 # CPU Pinning, Interrupts, Affinity, Governors, Topology, Isolating, and Priorities
 This warrants an entirely separate section because of how much of an impact this can make while also requiring a decent amount of time. And I mean a _major_ impact. Even after doing all those tweaks above, I still had awful DPC latency and stutters. After just a bit of messing with interrupts and pinning, I am almost consistently under 800 µs.
 
@@ -442,7 +449,7 @@ My system only has a single CPU and six cores twelve threads so messing with NUM
 
 ## Topology
 
-Find out how many cores and threads you want to give your VM. **Leave at least 2 cores for the host, otherwise both the guest and host performance will suffer. More is not better.** For me, I'm giving it 4 cores 8 threads. Set your CPU topology to that, and of course pass through your CPU features by setting CPU mode to host-passthrough (unless you have special AMD CPUs that require EPYC emulation)
+Find out how many cores and threads you want to give your VM. **Leave at least 2 cores for the host, otherwise both the guest and host performance will suffer. More is not better.** For me, I'm giving it 4 cores 8 threads. Set your CPU topology to that, and of course pass through your CPU features by setting CPU mode to host-passthrough (unless you have special AMD CPUs that require EPYC emulation for old QEMU versions)
 ```xml
     <topology sockets="1" dies="1" cores="4" threads="2"/>
 ```
@@ -450,100 +457,6 @@ This says we will have one socket, 4 cores, and 8 threads through hyperthreading
 ```xml
     <topology sockets="1" dies="1" cores="8" threads="1"/>
 ```
-
-## CPU Pinning and Layout
-We'll now pin our CPUs as well as set a realtime priority and better scheduler for the CPUs.
-
-Determine how many CPUs total you have defined. If you have defined 4 cores 2 threads in the topology, you will put 8 as so.
-```xml
-  <vcpu placement="static">8</vcpu>
-```
-We'll also dedicate a core to SCSI controller processing:
-```xml
-  <iothreads>1</iothreads>
-```
-
-To pin the CPUs, we need to know which CPU is a core and which is a thread. AKA our layout. This differs heavily between AMD and Intel processors.
-<br>
-Run `lscpu -e` and note what CPU in the 1st column goes to which core in the 4th column.
-
-Since I have hyperthreading on and I am on an Intel i7-8700k, the CPUs 0-5 go to physical cores 0-5 and the threads 6-11 go to physical cores 0-5 as shown here:
-```
-CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE    MAXMHZ   MINMHZ
-  0    0      0    0 0:0:0:0          yes 4700.0000 800.0000
-  1    0      0    1 1:1:1:0          yes 4700.0000 800.0000
-  2    0      0    2 2:2:2:0          yes 4700.0000 800.0000
-  3    0      0    3 3:3:3:0          yes 4700.0000 800.0000
-  4    0      0    4 4:4:4:0          yes 4700.0000 800.0000
-  5    0      0    5 5:5:5:0          yes 4700.0000 800.0000
-  6    0      0    0 0:0:0:0          yes 4700.0000 800.0000
-  7    0      0    1 1:1:1:0          yes 4700.0000 800.0000
-  8    0      0    2 2:2:2:0          yes 4700.0000 800.0000
-  9    0      0    3 3:3:3:0          yes 4700.0000 800.0000
- 10    0      0    4 4:4:4:0          yes 4700.0000 800.0000
- 11    0      0    5 5:5:5:0          yes 4700.0000 800.0000
-```
-
-For example, an AMD Ryzen 5 1600 may look like this:
-```
-CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE MAXMHZ    MINMHZ
-0   0    0      0    0:0:0:0       yes    3800.0000 1550.0000
-1   0    0      0    0:0:0:0       yes    3800.0000 1550.0000
-2   0    0      1    1:1:1:0       yes    3800.0000 1550.0000
-3   0    0      1    1:1:1:0       yes    3800.0000 1550.0000
-4   0    0      2    2:2:2:0       yes    3800.0000 1550.0000
-5   0    0      2    2:2:2:0       yes    3800.0000 1550.0000
-6   0    0      3    3:3:3:1       yes    3800.0000 1550.0000
-7   0    0      3    3:3:3:1       yes    3800.0000 1550.0000
-8   0    0      4    4:4:4:1       yes    3800.0000 1550.0000
-9   0    0      4    4:4:4:1       yes    3800.0000 1550.0000
-10  0    0      5    5:5:5:1       yes    3800.0000 1550.0000
-11  0    0      5    5:5:5:1       yes    3800.0000 1550.0000
-```
-
-Now that we know our layout, we can pin the CPUs.
-```xml
-  <cputune>
-    <vcpupin vcpu="0" cpuset="0"/>
-    <vcpupin vcpu="1" cpuset="6"/>
-    <vcpupin vcpu="2" cpuset="1"/>
-    <vcpupin vcpu="3" cpuset="7"/>
-    <vcpupin vcpu="4" cpuset="2"/>
-    <vcpupin vcpu="5" cpuset="8"/>
-    <vcpupin vcpu="6" cpuset="3"/>
-    <vcpupin vcpu="7" cpuset="9"/>
-  </cputune>
-```
-This is for a 4 core 2 thread setup aka 4 cores with hyperthreading so 8 threads. Pay attention to the pattern. In this, we're skipping the first core (core 0) because lots of applications tend to use the first core. So core 1 is actually core 2.
-
-|                    	|                 	|                    	|                    	|                    	|                    	|                 	|                 	|                    	|                    	|                    	|                    	|                 	|
-|--------------------	|-----------------	|--------------------	|--------------------	|--------------------	|--------------------	|-----------------	|-----------------	|--------------------	|--------------------	|--------------------	|--------------------	|-----------------	|
-| CPU/Thread #       	| CPU/Thread 0    	| CPU/Thread 1       	| CPU/Thread 2       	| CPU/Thread 3       	| CPU/Thread 4       	| CPU/Thread 5    	| CPU/Thread 6    	| CPU/Thread 7       	| CPU/Thread 8       	| CPU/Thread 9       	| CPU/Thread 10      	| CPU/Thread 11   	|
-| Physical Core #    	| Physical Core 0 	| Physical Core 1    	| Physical Core 2    	| Physical Core 3    	| Physical Core 4    	| Physical Core 5 	| Physical Core 0 	| Physical Core 1    	| Physical Core 2    	| Physical Core 3    	| Physical Core 4    	| Physical Core 5 	|
-| vCPU # pinned here 	|                 	| vCPU 0 pinned here 	| vCPU 2 pinned here 	| vCPU 4 pinned here 	| vCPU 6 pinned here 	|                 	|                 	| vCPU 1 pinned here 	| vCPU 3 pinned here 	| vCPU 5 pinned here 	| vCPU 7 pinned here 	|                 	|
-| vCPU #             	| vCPU 0          	| vCPU 1             	| vCPU 2             	| vCPU 3             	| vCPU 4             	| vCPU 5          	| vCPU 6          	| vCPU 7             	|                    	|                    	|                    	|                 	|
-
-If you have an 8 core 1 thread setup, yours will look something like this:
-```xml
-  <cputune>
-    <vcpupin vcpu='0' cpuset='0'/>
-    <vcpupin vcpu='1' cpuset='1'/>
-    <vcpupin vcpu='2' cpuset='2'/>
-    <vcpupin vcpu='3' cpuset='3'/>
-    <vcpupin vcpu='4' cpuset='4'/>
-    <vcpupin vcpu='5' cpuset='5'/>
-    <vcpupin vcpu='6' cpuset='6'/>
-    <vcpupin vcpu='7' cpuset='7'/>
-  </cputune>
-```
-
-Pin CPUs for QEMU itself and the iothread. Since we'll be restricting the host from using these CPUs, use the ones you restricted on the vCPU for the emulator and iothread.
-```xml
-    <emulatorpin cpuset="3,9"/>
-    <iothreadpin iothread="1" cpuset="2,8"/>
-```
-
-We are pinning core 3 and thread 9 for the emulator, and core 2 and thread 8 for IO processing as defined by iothread 1. We can set the virtio-scsi controller and virtio network card to use the iothread 1 as shown [here](#virtio-scsi-and-virtio-drivers) for IOPS.
 
 ## Isolating the CPUs
 We need to isolate the pinned CPUs from being used by the host. This is pretty easy through the kernel arguments `nohz_full, rcu_nocbs, isolcpus`. 
